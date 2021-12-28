@@ -34,6 +34,8 @@ sensor_numbers = range(num_panels)
 # emulate the serial device instead of actually connecting to one.
 NO_SERIAL = False
 
+app = web.Application()
+app['websockets'] = []
 
 class ProfileHandler(object):
   """
@@ -221,6 +223,7 @@ class SerialHandler(object):
           self.Open()
           # Still not open, retry loop.
           if not self.ser:
+            time.sleep(1)
             continue
 
         try:
@@ -251,7 +254,10 @@ class SerialHandler(object):
 
   def Write(self):
     while not thread_stop_event.isSet():
-      command = self.write_queue.get()
+      try:
+        command = self.write_queue.get(timeout=1)
+      except queue.Empty:
+        continue
       if NO_SERIAL:
         if command[0] == 't':
           broadcast(['thresholds',
@@ -338,6 +344,7 @@ async def get_ws(request):
   ws = web.WebSocketResponse()
   await ws.prepare(request)
 
+  request.app['websockets'].append(ws)
   print('Client connected')
   profile_handler.MaybeLoad()
 
@@ -347,20 +354,6 @@ async def get_ws(request):
     'thresholds',
     {'thresholds': profile_handler.GetCurThresholds()},
   ])
-
-  global read_thread, write_thread
-
-  if not read_thread or not read_thread.is_alive():
-    print('Starting Read thread')
-    read_thread = threading.Thread(target=serial_handler.Read)
-    read_thread.daemon = True
-    read_thread.start()
-
-  if not write_thread or not write_thread.is_alive():
-    print('Starting Write thread')
-    write_thread = threading.Thread(target=serial_handler.Write)
-    write_thread.daemon = True
-    write_thread.start()
 
   # Potentially fetch any threshold values from the microcontroller that
   # may be out of sync with our profiles.
@@ -414,6 +407,7 @@ async def get_ws(request):
   except ConnectionResetError:
     pass
   finally:
+    request.app['websockets'].remove(ws)
     with out_queues_lock:
       out_queues.remove(queue)
 
@@ -431,21 +425,29 @@ build_dir = os.path.abspath(
 async def get_index(request):
   return web.FileResponse(os.path.join(build_dir, 'index.html'))
 
+async def on_shutdown(app):
+  for ws in app['websockets']:
+        await ws.close(code=999, message='Server shutdown')
+  thread_stop_event.set()
 
-app = web.Application()
 app.add_routes([
   web.get('/defaults', get_defaults),
   web.get('/ws', get_ws),
+  web.get('/', get_index),
+  web.get('/plot', get_index),
+  web.static('/', build_dir),
 ])
-if not NO_SERIAL:
-  app.add_routes([
-    web.get('/', get_index),
-    web.get('/plot', get_index),
-    web.static('/', build_dir),
-  ])
-
+app.on_shutdown.append(on_shutdown)
 
 if __name__ == '__main__':
+  print('Starting Read thread')
+  read_thread = threading.Thread(target=serial_handler.Read)
+  read_thread.start()
+
+  print('Starting Write thread')
+  write_thread = threading.Thread(target=serial_handler.Write)
+  write_thread.start()
+
   hostname = socket.gethostname()
   ip_address = socket.gethostbyname(hostname)
   print(' * WebUI can be found at: http://' + ip_address + ':' + str(HTTP_PORT))

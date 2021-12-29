@@ -329,7 +329,8 @@ function WebUI(props) {
 function Plot(props) {
   const { numSensors, kCurThresholdsRef, kCurValuesRef, kCurValuesIndexRef } = props;
   const canvasRef = React.useRef(null);
-  const colors = ['red', 'orange', 'green', 'blue'].concat(new Array(36).fill('black'));
+  const colors = ['red', 'orange', 'green', 'blue'];
+  const buttonNames = ['Left', 'Down', 'Up', 'Right'];
   const display = new Array(numSensors).fill(true);
 
   useEffect(() => {
@@ -381,6 +382,7 @@ function Plot(props) {
       const spacing = 10;
       const box_width = canvas.width-spacing*2;
       const box_height = canvas.height-spacing*2
+      ctx.strokeStyle = 'darkgray';
       ctx.beginPath();
       ctx.rect(spacing, spacing, box_width, box_height);
       ctx.stroke();
@@ -400,7 +402,7 @@ function Plot(props) {
         if (display[i]) {
           ctx.beginPath();
           ctx.setLineDash([]);
-          ctx.strokeStyle = colors[i];
+          ctx.strokeStyle = colors[i % colors.length];
           ctx.lineWidth = 2;
           for (let j = 0; j < maxSize; j++) {
             // +1 because the plot should start at the oldest value, one after the current index in the
@@ -420,7 +422,7 @@ function Plot(props) {
         if (display[i]) {
           ctx.beginPath();
           ctx.setLineDash([]);
-          ctx.strokeStyle = 'dark' + colors[i];
+          ctx.strokeStyle = 'dark' + colors[i % colors.length];
           ctx.lineWidth = 2;
           ctx.moveTo(spacing, box_height - box_height * kCurThresholdsRef.current[i]/1023 + spacing);
           ctx.lineTo(box_width + spacing, box_height - box_height * kCurThresholdsRef.current[i]/1023 + spacing);
@@ -432,7 +434,7 @@ function Plot(props) {
       ctx.font = "30px " + bodyFontFamily;
       for (let i = 0; i < numSensors; ++i) {
         if (display[i]) {
-          ctx.fillStyle = colors[i];
+          ctx.fillStyle = colors[i % colors.length];
           ctx.fillText(kCurValuesRef.current[kCurValuesIndexRef.current][i], 100 + i * 100, 100);
         }
       }
@@ -446,10 +448,22 @@ function Plot(props) {
       cancelAnimationFrame(requestId);
       window.removeEventListener('resize', setDimensions);
     };
-  }, [colors, display]);
+  }, [colors, display, numSensors]);
 
   function ToggleLine(index) {
     display[index] = !display[index];
+  }
+
+  const toggleButtons = [];
+  for (let i = 0; i < numSensors; i++) {
+    toggleButtons.push(
+      <>
+        <Button key={i} variant="light" size="sm" onClick={() => ToggleLine(i)}>
+          <b style={{color: colors[i % colors.length]}}>{numSensors === buttonNames.length ? buttonNames[i] : i + 1}</b>
+        </Button>
+        <span> </span>
+      </>
+    );
   }
 
   return (
@@ -458,21 +472,7 @@ function Plot(props) {
         <Row>
           <Col style={{height: '9vh', paddingTop: '2vh'}}>
             <span>Display: </span>
-            <Button variant="light" size="sm" onClick={() => ToggleLine(0)}>
-              <b style={{color: colors[0]}}>Left</b>
-            </Button>
-            <span> </span>
-            <Button variant="light" size="sm" onClick={() => ToggleLine(1)}>
-              <b style={{color: colors[1]}}>Down</b>
-            </Button>
-            <span> </span>
-            <Button variant="light" size="sm" onClick={() => ToggleLine(2)}>
-              <b style={{color: colors[2]}}>Up</b>
-            </Button>
-            <span> </span>
-            <Button variant="light" size="sm" onClick={() => ToggleLine(3)}>
-              <b style={{color: colors[3]}}>Right</b>
-            </Button>
+            {toggleButtons}
           </Col>
         </Row>
         <Row>

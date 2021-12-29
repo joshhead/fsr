@@ -108,7 +108,7 @@ function useServerConnection() {
     };
   });
 
-  return { emit, numSensors, kCurThresholdsRef, kCurValuesRef, kCurValuesIndexRef };
+  return { emit, numSensors, kCurThresholdsRef, kCurValuesRef, kCurValuesIndexRef, wsCallbacksRef };
 }
 
 // An interactive display of the current values obtained by the backend.
@@ -489,30 +489,112 @@ function Plot(props) {
 
 function App() {
   const serverConnectionProps = useServerConnection();
+  const { emit, kCurThresholdsRef, wsCallbacksRef } = serverConnectionProps;
+  const [fetched, setFetched] = useState(false);
+  const [profiles, setProfiles] = useState([]);
+  const [activeProfile, setActiveProfile] = useState('');
 
+  useEffect(() => {
+    // Fetch all the default values the first time we load the page.
+    // We will re-render after everything is fetched.
+    if (!fetched) {
+      fetch('/defaults').then(res => res.json()).then(data => {
+          setProfiles(data.profiles);
+          setActiveProfile(data.cur_profile);
+          kCurThresholdsRef.current = data.thresholds;
+          setFetched(true);
+      });
+    }
+
+    wsCallbacksRef.current.get_profiles = function(msg) {
+      setProfiles(msg.profiles);
+    };
+    wsCallbacksRef.current.get_cur_profile = function(msg) {
+      setActiveProfile(msg.cur_profile);
+    };
+
+    return () => {
+      delete wsCallbacksRef.current.get_profiles;
+      delete wsCallbacksRef.current.get_cur_profile;
+    };
+  }, [fetched, profiles, activeProfile]);
+
+  function AddProfile(e) {
+    // Only add a profile on the enter key.
+    if (e.keyCode === 13) {
+      emit(['add_profile', e.target.value, kCurThresholdsRef.current]);
+      // Reset the text box.
+      e.target.value = "";
+    }
+    return false;
+  }
+
+  function RemoveProfile(e) {
+    // Strip out the "X " added by the button.
+    const profile_name = e.target.parentNode.innerText.replace('X ', '');
+    emit(['remove_profile', profile_name]);
+  }
+
+  function ChangeProfile(e) {
+    // Strip out the "X " added by the button.
+    const profile_name = e.target.innerText.replace('X ', '');
+    emit(['change_profile', profile_name]);
+  }
+
+  // Don't render anything until the defaults are fetched.
   return (
-    <div className="App">
-      <Router>
-        <Navbar bg="light">
-          <Navbar.Brand as={Link} to="/">FSR WebUI</Navbar.Brand>
-          <Nav>
-            <Nav.Item>
-              <Nav.Link as={Link} to="/plot">Plot</Nav.Link>
-            </Nav.Item>
-          </Nav>
-          <Nav className="ml-auto">
-          </Nav>
-        </Navbar>
-        <Switch>
-          <Route exact path="/">
-            <WebUI {...serverConnectionProps} />
-          </Route>
-          <Route path="/plot">
-            <Plot {...serverConnectionProps} />
-          </Route>
-        </Switch>
-      </Router>
-    </div>
+    fetched ?
+      <div className="App">
+        <Router>
+          <Navbar bg="light">
+            <Navbar.Brand as={Link} to="/">FSR WebUI</Navbar.Brand>
+            <Nav>
+              <Nav.Item>
+                <Nav.Link as={Link} to="/plot">Plot</Nav.Link>
+              </Nav.Item>
+            </Nav>
+            <Nav className="ml-auto">
+            <NavDropdown alignRight title="Profile" id="collasible-nav-dropdown">
+              {profiles.map(function(profile) {
+                if (profile === activeProfile) {
+                  return(
+                    <NavDropdown.Item key={profile} style={{paddingLeft: "0.5rem"}}
+                        onClick={ChangeProfile} active>
+                      <Button variant="light" onClick={RemoveProfile}>X</Button>{' '}{profile}
+                    </NavDropdown.Item>
+                  );
+                } else {
+                  return(
+                    <NavDropdown.Item key={profile} style={{paddingLeft: "0.5rem"}}
+                        onClick={ChangeProfile}>
+                      <Button variant="light" onClick={RemoveProfile}>X</Button>{' '}{profile}
+                    </NavDropdown.Item>
+                  );
+                }
+              })}
+              <NavDropdown.Divider />
+              <Form inline onSubmit={(e) => e.preventDefault()}>
+                <Form.Control
+                    onKeyDown={AddProfile}
+                    style={{marginLeft: "0.5rem", marginRight: "0.5rem"}}
+                    type="text"
+                    placeholder="New Profile" />
+              </Form>
+            </NavDropdown>
+            </Nav>
+          </Navbar>
+          <Switch>
+            <Route exact path="/">
+              <WebUI {...serverConnectionProps} />
+            </Route>
+            <Route path="/plot">
+              <Plot {...serverConnectionProps} />
+            </Route>
+          </Switch>
+        </Router>
+      </div>
+      :
+      <></>
   );
 }
 

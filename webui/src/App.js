@@ -22,7 +22,7 @@ import {
 } from "react-router-dom";
 
 // How many historical readings to retain for plotting sensor values
-const max_size = 1000;
+const maxSize = 1000;
 
 function useServerConnection() {
 
@@ -33,7 +33,7 @@ function useServerConnection() {
   // Keep track of the current thresholds (initially fetched from the backend).
   const kCurThresholdsRef = useRef(undefined);
 
-  // A history of the past 'max_size' values fetched from the backend.
+  // A history of the past 'maxSize' values fetched from the backend.
   // Used for plotting and displaying live values.
   // We use a cyclical array to save memory.
   const kCurValuesRef = useRef([]);
@@ -55,7 +55,7 @@ function useServerConnection() {
   });
 
   wsCallbacksRef.current.values = function(msg) {
-    kCurValuesIndexRef.current = (kCurValuesIndexRef.current + 1) % max_size
+    kCurValuesIndexRef.current = (kCurValuesIndexRef.current + 1) % maxSize
     kCurValuesRef.current[kCurValuesIndexRef.current] = msg.values;
     setNumSensors(msg.values.length);
   };
@@ -326,8 +326,161 @@ function WebUI(props) {
   );
 }
 
-function Plot() {
-  return <div>Plot</div>
+function Plot(props) {
+  const { numSensors, kCurThresholdsRef, kCurValuesRef, kCurValuesIndexRef } = props;
+  const canvasRef = React.useRef(null);
+  const colors = ['red', 'orange', 'green', 'blue'].concat(new Array(36).fill('black'));
+  const display = new Array(numSensors).fill(true);
+
+  useEffect(() => {
+    let requestId;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+
+    const setDimensions = () => {
+      // Adjust DPI so that all the edges are smooth during scaling.
+      const dpi = window.devicePixelRatio || 1;
+
+      canvas.width = canvas.clientWidth * dpi;
+      canvas.height = canvas.clientHeight * dpi;
+    };
+
+    setDimensions();
+    window.addEventListener('resize', setDimensions);
+
+    // This is default React CSS font style.
+    const bodyFontFamily = window.getComputedStyle(document.body).getPropertyValue("font-family");
+
+    function drawDashedLine(pattern, spacing, y, width) {
+      ctx.beginPath();
+      ctx.setLineDash(pattern);
+      ctx.moveTo(spacing, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+    }
+
+    // cap animation to 60 FPS (with slight leeway because monitor refresh rates are not exact)
+    const minFrameDurationMs = 1000 / 60.1;
+    var previousTimestamp;
+
+    const render = (timestamp) => {
+      if (previousTimestamp && (timestamp - previousTimestamp) < minFrameDurationMs) {
+        requestId = requestAnimationFrame(render);
+        return;
+      }
+      previousTimestamp = timestamp;
+
+      // Add background fill.
+      let grd = ctx.createLinearGradient(canvas.width/2, 0, canvas.width/2 ,canvas.height);
+      grd.addColorStop(0, 'white');
+      grd.addColorStop(1, 'lightgray');
+      ctx.fillStyle = grd;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Border
+      const spacing = 10;
+      const box_width = canvas.width-spacing*2;
+      const box_height = canvas.height-spacing*2
+      ctx.beginPath();
+      ctx.rect(spacing, spacing, box_width, box_height);
+      ctx.stroke();
+
+      // Draw the divisions in the plot.
+      // Major Divisions will be 2 x minor_divison.
+      const minor_division = 100;
+      for (let i = 1; i*minor_division < 1023; ++i) {
+        const pattern = i % 2 === 0 ? [20, 5] : [5, 10];
+        drawDashedLine(pattern, spacing,
+          box_height-(box_height * (i*minor_division)/1023) + spacing, box_width + spacing);
+      }
+
+      // Plot the line graph for each of the sensors.
+      const px_per_div = box_width/maxSize;
+      for (let i = 0; i < numSensors; i++) {
+        if (display[i]) {
+          ctx.beginPath();
+          ctx.setLineDash([]);
+          ctx.strokeStyle = colors[i];
+          ctx.lineWidth = 2;
+          for (let j = 0; j < maxSize; j++) {
+            if (kCurValuesRef.current[j]) {
+              ctx.lineTo(px_per_div*j + spacing, box_height - box_height * kCurValuesRef.current[j][i]/1023 + spacing);
+            }
+          }
+          ctx.stroke();
+        }
+      }
+
+      // Display the current thresholds.
+      for (let i = 0; i < numSensors; ++i) {
+        if (display[i]) {
+          ctx.beginPath();
+          ctx.setLineDash([]);
+          ctx.strokeStyle = 'dark' + colors[i];
+          ctx.lineWidth = 2;
+          ctx.moveTo(spacing, box_height - box_height * kCurThresholdsRef.current[i]/1023 + spacing);
+          ctx.lineTo(box_width + spacing, box_height - box_height * kCurThresholdsRef.current[i]/1023 + spacing);
+          ctx.stroke();
+        }
+      }
+
+      // Display the current value for each of the sensors.
+      ctx.font = "30px " + bodyFontFamily;
+      for (let i = 0; i < numSensors; ++i) {
+        if (display[i]) {
+          ctx.fillStyle = colors[i];
+          ctx.fillText(kCurValuesRef.current[kCurValuesIndexRef.current][i], 100 + i * 100, 100);
+        }
+      }
+
+      requestId = requestAnimationFrame(render);
+    };
+
+    render();
+
+    return () => {
+      cancelAnimationFrame(requestId);
+      window.removeEventListener('resize', setDimensions);
+    };
+  }, [colors, display]);
+
+  function ToggleLine(index) {
+    display[index] = !display[index];
+  }
+
+  return (
+    <header className="App-header">
+      <Container fluid style={{border: '1px solid white', height: '100vh'}}>
+        <Row>
+          <Col style={{height: '9vh', paddingTop: '2vh'}}>
+            <span>Display: </span>
+            <Button variant="light" size="sm" onClick={() => ToggleLine(0)}>
+              <b style={{color: colors[0]}}>Left</b>
+            </Button>
+            <span> </span>
+            <Button variant="light" size="sm" onClick={() => ToggleLine(1)}>
+              <b style={{color: colors[1]}}>Down</b>
+            </Button>
+            <span> </span>
+            <Button variant="light" size="sm" onClick={() => ToggleLine(2)}>
+              <b style={{color: colors[2]}}>Up</b>
+            </Button>
+            <span> </span>
+            <Button variant="light" size="sm" onClick={() => ToggleLine(3)}>
+              <b style={{color: colors[3]}}>Right</b>
+            </Button>
+          </Col>
+        </Row>
+        <Row>
+          <Col style={{height: '86vh'}}>
+            <canvas
+              ref={canvasRef}
+              style={{border: '1px solid white', width: '100%', height: '100%', touchAction: "none"}} />
+          </Col>
+        </Row>
+      </Container>
+    </header>
+  );
 }
 
 function App() {
@@ -351,7 +504,7 @@ function App() {
             <WebUI {...serverConnectionProps} />
           </Route>
           <Route path="/plot">
-            <Plot />
+            <Plot {...serverConnectionProps} />
           </Route>
         </Switch>
       </Router>

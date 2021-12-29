@@ -403,8 +403,12 @@ function Plot(props) {
           ctx.strokeStyle = colors[i];
           ctx.lineWidth = 2;
           for (let j = 0; j < maxSize; j++) {
-            if (kCurValuesRef.current[j]) {
-              ctx.lineTo(px_per_div*j + spacing, box_height - box_height * kCurValuesRef.current[j][i]/1023 + spacing);
+            // +1 because the plot should start at the oldest value, one after the current index in the
+            // circular array.
+            const valuesIndex = (kCurValuesIndexRef.current + 1 + j) % maxSize;
+            if (kCurValuesRef.current[valuesIndex]) {
+              ctx.lineTo(px_per_div*j + spacing,
+                box_height - box_height * kCurValuesRef.current[valuesIndex][i]/1023 + spacing);
             }
           }
           ctx.stroke();

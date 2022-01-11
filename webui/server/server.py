@@ -32,9 +32,6 @@ sensor_numbers = range(num_panels)
 # emulate the serial device instead of actually connecting to one.
 NO_SERIAL = False
 
-app = web.Application()
-app['websockets'] = []
-
 class ProfileHandler(object):
   """
   A class to handle all the profile modifications.

@@ -10,7 +10,7 @@ from collections import OrderedDict
 from random import normalvariate
 
 import serial
-from aiohttp import web, WSMsgType
+from aiohttp import web, WSCloseCode, WSMsgType
 from aiohttp.web import json_response
 
 logger = logging.getLogger(__name__)
@@ -19,9 +19,7 @@ logger = logging.getLogger(__name__)
 SERIAL_PORT = "/dev/ttyACM0"
 HTTP_PORT = 5000
 
-# Threads for the serial reader and writer.
-read_thread = None
-write_thread = None
+# Event to tell the reader and writer threads to exit.
 thread_stop_event = threading.Event()
 
 # Amount of panels.
@@ -425,10 +423,22 @@ build_dir = os.path.abspath(
 async def get_index(request):
   return web.FileResponse(os.path.join(build_dir, 'index.html'))
 
+async def on_startup(app):
+  read_thread = threading.Thread(target=serial_handler.Read)
+  read_thread.start()
+
+  write_thread = threading.Thread(target=serial_handler.Write)
+  write_thread.start()
+
 async def on_shutdown(app):
   for ws in app['websockets']:
-        await ws.close(code=999, message='Server shutdown')
+    await ws.close(code=WSCloseCode.GOING_AWAY, message='Server shutdown')
   thread_stop_event.set()
+
+app = web.Application()
+
+# List of open websockets, to close when the app shuts down.
+app['websockets'] = []
 
 app.add_routes([
   web.get('/defaults', get_defaults),
@@ -438,16 +448,9 @@ app.add_routes([
   web.static('/', build_dir),
 ])
 app.on_shutdown.append(on_shutdown)
+app.on_startup.append(on_startup)
 
 if __name__ == '__main__':
-  print('Starting Read thread')
-  read_thread = threading.Thread(target=serial_handler.Read)
-  read_thread.start()
-
-  print('Starting Write thread')
-  write_thread = threading.Thread(target=serial_handler.Write)
-  write_thread.start()
-
   hostname = socket.gethostname()
   ip_address = socket.gethostbyname(hostname)
   print(' * WebUI can be found at: http://' + ip_address + ':' + str(HTTP_PORT))

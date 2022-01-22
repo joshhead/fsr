@@ -21,17 +21,16 @@ import {
   Link
 } from "react-router-dom";
 
-// Amount of panels.
-const num_panels = 4;
-
 // Keep track of the current thresholds fetched from the backend.
 // Make it global since it's used by many components.
-let kCurThresholds = new Array(num_panels).fill(0);
+// Initialize once the number of panels is known.
+let kCurThresholds;
 
 // A history of the past 'max_size' values fetched from the backend.
 // Used for plotting and displaying live values.
 // We use a cyclical array to save memory.
-let kCurValues = [new Array(num_panels).fill(0)];
+// Initialize once the number of panels is known.
+let kCurValues;
 const max_size = 1000;
 let oldest = 0;
 
@@ -91,8 +90,6 @@ wsCallbacks.values = function(msg) {
 wsCallbacks.thresholds = function(msg) {
   kCurThresholds = msg.thresholds;
 };
-
-connect();
 
 // An interactive display of the current values obtained by the backend.
 // Also has functionality to manipulate thresholds.
@@ -299,13 +296,14 @@ function ValueMonitor(props) {
   );
 }
 
-function WebUI() {
+function WebUI(props) {
+  const numPanels = props.numPanels;
   return (
     <header className="App-header">
       <Container fluid style={{border: '1px solid white', height: '100vh'}}>
         <Row>
-          {[...Array(num_panels).keys()].map(value_monitor => (
-          	<ValueMonitor index={value_monitor}/>)
+          {[...Array(numPanels).keys()].map(index => (
+          	<ValueMonitor index={index} key={index} />)
           )}
         </Row>
       </Container>
@@ -479,23 +477,13 @@ function Plot() {
   );
 }
 
-function App() {
-  const [fetched, setFetched] = useState(false);
-  const [profiles, setProfiles] = useState([]);
-  const [activeProfile, setActiveProfile] = useState('');
+function MainPartOfApp(props) {
+  const defaults = props.defaults;
+  const numPanels = defaults.thresholds.length;
+  const [profiles, setProfiles] = useState(defaults.profiles);
+  const [activeProfile, setActiveProfile] = useState(defaults.cur_profile);
 
   useEffect(() => {
-    // Fetch all the default values the first time we load the page.
-    // We will re-render after everything is fetched.
-    if (!fetched) {
-      fetch('/defaults').then(res => res.json()).then(data => {
-          setProfiles(data.profiles);
-          setActiveProfile(data.cur_profile);
-          kCurThresholds = data.thresholds;
-          setFetched(true);
-      });
-    }
-
     wsCallbacks.get_profiles = function(msg) {
       setProfiles(msg.profiles);
     };
@@ -507,7 +495,7 @@ function App() {
       delete wsCallbacks.get_profiles;
       delete wsCallbacks.get_cur_profile;
     };
-  }, [fetched, profiles, activeProfile]);
+  }, [activeProfile]);
 
   function AddProfile(e) {
     // Only add a profile on the enter key.
@@ -533,59 +521,84 @@ function App() {
 
   // Don't render anything until the defaults are fetched.
   return (
-    fetched ?
-      <div className="App">
-        <Router>
-          <Navbar bg="light">
-            <Navbar.Brand as={Link} to="/">FSR WebUI</Navbar.Brand>
-            <Nav>
-              <Nav.Item>
-                <Nav.Link as={Link} to="/plot">Plot</Nav.Link>
-              </Nav.Item>
-            </Nav>
-            <Nav className="ml-auto">
-              <NavDropdown alignRight title="Profile" id="collasible-nav-dropdown">
-                {profiles.map(function(profile) {
-                  if (profile === activeProfile) {
-                    return(
-                      <NavDropdown.Item key={profile} style={{paddingLeft: "0.5rem"}}
-                          onClick={ChangeProfile} active>
-                        <Button variant="light" onClick={RemoveProfile}>X</Button>{' '}{profile}
-                      </NavDropdown.Item>
-                    );
-                  } else {
-                    return(
-                      <NavDropdown.Item key={profile} style={{paddingLeft: "0.5rem"}}
-                          onClick={ChangeProfile}>
-                        <Button variant="light" onClick={RemoveProfile}>X</Button>{' '}{profile}
-                      </NavDropdown.Item>
-                    );
-                  }
-                })}
-                <NavDropdown.Divider />
-                <Form inline onSubmit={(e) => e.preventDefault()}>
-                  <Form.Control
-                      onKeyDown={AddProfile}
-                      style={{marginLeft: "0.5rem", marginRight: "0.5rem"}}
-                      type="text"
-                      placeholder="New Profile" />
-                </Form>
-              </NavDropdown>
-            </Nav>
-          </Navbar>
-          <Switch>
-            <Route exact path="/">
-              <WebUI />
-            </Route>
-            <Route path="/plot">
-              <Plot />
-            </Route>
-          </Switch>
-        </Router>
-      </div>
-    :
-    <></>
+    <div className="App">
+      <Router>
+        <Navbar bg="light">
+          <Navbar.Brand as={Link} to="/">FSR WebUI</Navbar.Brand>
+          <Nav>
+            <Nav.Item>
+              <Nav.Link as={Link} to="/plot">Plot</Nav.Link>
+            </Nav.Item>
+          </Nav>
+          <Nav className="ml-auto">
+            <NavDropdown alignRight title="Profile" id="collasible-nav-dropdown">
+              {profiles.map(function(profile) {
+                if (profile === activeProfile) {
+                  return(
+                    <NavDropdown.Item key={profile} style={{paddingLeft: "0.5rem"}}
+                        onClick={ChangeProfile} active>
+                      <Button variant="light" onClick={RemoveProfile}>X</Button>{' '}{profile}
+                    </NavDropdown.Item>
+                  );
+                } else {
+                  return(
+                    <NavDropdown.Item key={profile} style={{paddingLeft: "0.5rem"}}
+                        onClick={ChangeProfile}>
+                      <Button variant="light" onClick={RemoveProfile}>X</Button>{' '}{profile}
+                    </NavDropdown.Item>
+                  );
+                }
+              })}
+              <NavDropdown.Divider />
+              <Form inline onSubmit={(e) => e.preventDefault()}>
+                <Form.Control
+                    onKeyDown={AddProfile}
+                    style={{marginLeft: "0.5rem", marginRight: "0.5rem"}}
+                    type="text"
+                    placeholder="New Profile" />
+              </Form>
+            </NavDropdown>
+          </Nav>
+        </Navbar>
+        <Switch>
+          <Route exact path="/">
+            <WebUI numPanels={numPanels} />
+          </Route>
+          <Route path="/plot">
+            <Plot />
+          </Route>
+        </Switch>
+      </Router>
+    </div>
   );
+}
+
+function App() {
+  const [defaults, setDefaults] = useState();
+
+  useEffect(() => {
+    // Fetch all the default values the first time we load the page.
+    // We will re-render after everything is fetched.
+    fetch('/defaults').then(res => res.json()).then(data => {
+      const numPanels = data.thresholds.length;
+
+      kCurThresholds = new Array(numPanels).fill(0);
+      kCurValues = [new Array(numPanels).fill(0)];
+      
+      // Open WebSocket connection
+      connect();
+
+      // Trigger render of the rest of the app, with defaults
+      setDefaults(data);
+    });
+  }, []);
+
+  // Don't render anything until the defaults are fetched.
+  if (defaults) {
+    return <MainPartOfApp defaults={defaults} />
+  } else {
+    return null;
+  }
 }
 
 export default App;

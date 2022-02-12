@@ -442,13 +442,10 @@ app['websockets'] = []
 app.add_routes([
   web.get('/defaults', get_defaults),
   web.get('/ws', get_ws),
+  web.get('/', get_index),
+  web.get('/plot', get_index),
+  web.static('/', build_dir),
 ])
-if not NO_SERIAL:
-  app.add_routes([
-    web.get('/', get_index),
-    web.get('/plot', get_index),
-    web.static('/', build_dir),
-  ])
 app.on_shutdown.append(on_shutdown)
 app.on_startup.append(on_startup)
 
